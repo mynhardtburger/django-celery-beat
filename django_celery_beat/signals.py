@@ -1,7 +1,7 @@
 """Django Application signals."""
 
 
-def signals_connect():
+def signals_connect() -> None:
     """Connect to signals."""
     from django.db.models import signals
 

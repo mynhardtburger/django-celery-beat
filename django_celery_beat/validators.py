@@ -7,7 +7,7 @@ from django.core.exceptions import ValidationError
 class _CronSlices(crontab.CronSlices):
     """Cron slices with customized validation."""
 
-    def __init__(self, *args):
+    def __init__(self, *args) -> None:
         super(crontab.CronSlices, self).__init__(
             [_CronSlice(info) for info in crontab.S_INFO]
         )
@@ -16,7 +16,7 @@ class _CronSlices(crontab.CronSlices):
         self.is_valid = self.is_self_valid
 
     @classmethod
-    def validate(cls, *args):
+    def validate(cls, *args) -> None:
         try:
             cls(*args)
         except Exception as e:
@@ -37,7 +37,7 @@ class _CronRange(crontab.CronRange):
     """Cron range parser class."""
 
     # rewrite whole method to raise error on bad range
-    def parse(self, value):
+    def parse(self, value) -> None:
         if value.count('/') == 1:
             value, seq = value.split('/')
             try:

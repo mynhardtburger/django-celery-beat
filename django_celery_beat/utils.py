@@ -1,10 +1,16 @@
 """Utilities."""
+from __future__ import annotations
 # -- XXX This module must not use translation as that causes
 # -- a recursive loader import!
 from datetime import timezone as datetime_timezone
 
 from django.conf import settings
 from django.utils import timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from datetime import datetime, time
+
 
 is_aware = timezone.is_aware
 # celery schedstate return None will make it not work
@@ -14,7 +20,7 @@ NEVER_CHECK_TIMEOUT = 100000000
 now_localtime = getattr(timezone, 'template_localtime', timezone.localtime)
 
 
-def make_aware(value):
+def make_aware(value: time | datetime) -> datetime | time:
     """Force datatime to have timezone information."""
     if getattr(settings, 'USE_TZ', False):
         # naive datetimes are assumed to be in UTC.
@@ -29,7 +35,7 @@ def make_aware(value):
     return value
 
 
-def now():
+def now() -> datetime:
     """Return the current date and time."""
     if getattr(settings, 'USE_TZ', False):
         return now_localtime(timezone.now())
@@ -37,7 +43,7 @@ def now():
         return timezone.now()
 
 
-def is_database_scheduler(scheduler):
+def is_database_scheduler(scheduler: str) -> bool:
     """Return true if Celery is configured to use the db scheduler."""
     if not scheduler:
         return False

@@ -1,10 +1,12 @@
 """Timezone aware Cron schedule Implementation."""
-from collections import namedtuple
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 from celery import schedules
 
-schedstate = namedtuple('schedstate', ('is_due', 'next'))
+class SchedState(NamedTuple):
+    is_due: bool
+    next: float
 
 
 class TzAwareCrontab(schedules.crontab):
@@ -25,10 +27,10 @@ class TzAwareCrontab(schedules.crontab):
             month_of_year=month_of_year, nowfun=nowfun, app=app
         )
 
-    def nowfunc(self):
+    def nowfunc(self) -> datetime:
         return datetime.now(self.tz)
 
-    def is_due(self, last_run_at):
+    def is_due(self, last_run_at) -> SchedState:
         """Calculate when the next run will take place.
 
         Return tuple of ``(is_due, next_time_to_check)``.
@@ -44,10 +46,10 @@ class TzAwareCrontab(schedules.crontab):
         if due:
             rem_delta = self.remaining_estimate(self.now())
             rem = max(rem_delta.total_seconds(), 0)
-        return schedstate(due, rem)
+        return SchedState(due, rem)
 
     # Needed to support pickling
-    def __repr__(self):
+    def __repr__(self) -> str:
         return """<crontab: {0._orig_minute} {0._orig_hour}
          {0._orig_day_of_week} {0._orig_day_of_month}
           {0._orig_month_of_year} (m/h/d/dM/MY), {0.tz}>

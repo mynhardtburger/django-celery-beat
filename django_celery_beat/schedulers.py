@@ -1,10 +1,12 @@
 """Beat Scheduler Implementation."""
+from __future__ import annotations
+
 import datetime
 import logging
 import math
 from multiprocessing.util import Finalize
 
-from celery import current_app, schedules
+from celery import Celery, current_app, schedules
 from celery.beat import ScheduleEntry, Scheduler
 from celery.utils.log import get_logger
 from celery.utils.time import maybe_make_aware
@@ -44,7 +46,7 @@ class ModelEntry(ScheduleEntry):
     )
     save_fields = ['last_run_at', 'total_run_count', 'no_changes']
 
-    def __init__(self, model, app=None):
+    def __init__(self, model: PeriodicTask, app: Celery | None = None):
         """Initialize the model entry."""
         self.app = app or current_app._get_current_object()
         self.name = model.name
@@ -95,7 +97,7 @@ class ModelEntry(ScheduleEntry):
 
         self.last_run_at = model.last_run_at
 
-    def _disable(self, model):
+    def _disable(self, model: PeriodicTask):
         model.no_changes = True
         model.enabled = False
         model.save()
