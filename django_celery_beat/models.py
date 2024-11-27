@@ -490,7 +490,7 @@ class PeriodicTask(models.Model):
     )
 
     # you can use low-level AMQP routing options here,
-    # but you almost certaily want to leave these as None
+    # but you almost certainly want to leave these as None
     # http://docs.celeryproject.org/en/latest/userguide/routing.html#exchanges-queues-and-routing-keys
     exchange = models.CharField(
         max_length=200, blank=True, null=True, default=None,
@@ -663,3 +663,31 @@ class PeriodicTask(models.Model):
     @property
     def schedule(self):
         return self.scheduler.schedule
+
+
+class RunHistory(models.Model):
+    """
+    Tracks the history of when tasks were triggered.
+    """
+    periodic_task = models.ForeignKey(PeriodicTask, on_delete=models.CASCADE)
+    previous_run_at = models.DateTimeField(
+        auto_now=False, auto_now_add=False,
+        editable=False, blank=False, null=False,
+        verbose_name=_('Last Run Datetime'),
+        help_text=_(
+            'Datetime that this scheduled task was previously triggered to run. '
+            'Copied from `PeriodicTask.last_run_at`.'),
+    )
+    run_at = models.DateTimeField(
+        auto_now=False, auto_now_add=False,
+        editable=False, blank=True, null=True,
+        verbose_name=_('Run Datetime'),
+        help_text=_(
+            'Datetime that this scheduled task was triggered the to run.'),
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['periodic_task', 'previous_run_at'],
+                                    name='run_instance')
+        ]
