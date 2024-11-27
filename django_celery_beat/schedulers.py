@@ -250,9 +250,9 @@ class DatabaseScheduler(Scheduler):
         self.install_default_entries(self.schedule)
         self.update_from_dict(self.app.conf.beat_schedule)
 
-    def all_as_schedule(self):
+    def all_as_schedule(self) -> dict[str, ModelEntry]:
         debug('DatabaseScheduler: Fetching database schedule')
-        s = {}
+        s: dict[str, ModelEntry] = {}
         for model in self.Model.objects.enabled():
             try:
                 s[model.name] = self.Entry(model, app=self.app)
@@ -357,7 +357,7 @@ class DatabaseScheduler(Scheduler):
         return super().schedules_equal(*args, **kwargs)
 
     @property
-    def schedule(self):
+    def schedule(self) -> dict[str, ModelEntry] | None:
         initial = update = False
         if self._initial_read:
             debug('DatabaseScheduler: initial read')
