@@ -625,9 +625,10 @@ class PeriodicTask(models.Model):
         super().save(*args, **kwargs)
         PeriodicTasks.changed(self)
 
-    def delete(self, *args, **kwargs):
-        super().delete(*args, **kwargs)
+    def delete(self, *args, **kwargs) -> tuple[int, dict[str, int]]:
+        del_count, del_detail = super().delete(*args, **kwargs)
         PeriodicTasks.changed(self)
+        return del_count, del_detail
 
     def _clean_expires(self):
         if self.expire_seconds is not None and self.expires:
