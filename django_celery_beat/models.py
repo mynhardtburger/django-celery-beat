@@ -672,25 +672,26 @@ class RunHistory(models.Model):
     """
     Tracks the history of when tasks were triggered.
     """
-    periodic_task = models.ForeignKey(PeriodicTask, on_delete=models.CASCADE)
-    previous_run_at = models.DateTimeField(
-        auto_now=False, auto_now_add=False,
-        editable=False, blank=False, null=False,
-        verbose_name=_('Last Run Datetime'),
+    periodic_task = models.ForeignKey(PeriodicTask, on_delete=models.CASCADE,
+                                      editable=True)
+    run_number = models.PositiveIntegerField(
+        default=1, editable=False, blank=False, null=False,
+        verbose_name=_('Run Count'),
         help_text=_(
-            'Datetime that this scheduled task was previously triggered to run. '
-            'Copied from `PeriodicTask.last_run_at`.'),
+            'Run count of this triggered task'),
     )
     run_at = models.DateTimeField(
         auto_now=False, auto_now_add=False,
-        editable=False, blank=True, null=True,
+        editable=True, blank=True, null=True,
         verbose_name=_('Run Datetime'),
         help_text=_(
             'Datetime that this scheduled task was triggered the to run.'),
     )
 
     class Meta:
+        verbose_name = _('run history')
+        verbose_name_plural = _('run histories')
         constraints = [
-            models.UniqueConstraint(fields=['periodic_task', 'previous_run_at'],
+            models.UniqueConstraint(fields=['periodic_task', 'run_number'],
                                     name='run_instance')
         ]

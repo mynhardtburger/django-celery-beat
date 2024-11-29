@@ -12,7 +12,7 @@ from django.utils.translation import ngettext_lazy
 from kombu.utils.json import loads
 
 from .models import (ClockedSchedule, CrontabSchedule, IntervalSchedule,
-                     PeriodicTask, PeriodicTasks, SolarSchedule)
+                     PeriodicTask, PeriodicTasks, RunHistory, SolarSchedule)
 from .utils import is_database_scheduler
 
 
@@ -317,3 +317,8 @@ class SolarScheduleAdmin(ScheduleAdmin):
 class IntervalScheduleAdmin(ScheduleAdmin):
     """Admin class for IntervalSchedule."""
     pass
+
+@admin.register(RunHistory)
+class RunHistoryAdmin(admin.ModelAdmin):
+    """Admin class for RunHistory."""
+    date_hierarchy = 'run_at'
