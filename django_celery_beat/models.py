@@ -1,10 +1,12 @@
 """Database models."""
+from __future__ import annotations
+
 try:
     from zoneinfo import available_timezones
 except ImportError:
     from backports.zoneinfo import available_timezones
 
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 import timezone_field
 from celery import current_app, schedules
@@ -417,7 +419,7 @@ class PeriodicTasks(models.Model):
         cls.objects.update_or_create(ident=1, defaults={'last_update': now()})
 
     @classmethod
-    def last_change(cls):
+    def last_change(cls) -> datetime | None:
         try:
             return cls.objects.get(ident=1).last_update
         except cls.DoesNotExist:
