@@ -5,6 +5,7 @@ import datetime
 import logging
 import math
 from multiprocessing.util import Finalize
+from typing import TYPE_CHECKING
 
 from celery import Celery, current_app, schedules
 from celery.beat import ScheduleEntry, Scheduler
@@ -21,6 +22,9 @@ from .clockedschedule import clocked
 from .models import (ClockedSchedule, CrontabSchedule, IntervalSchedule,
                      PeriodicTask, PeriodicTasks, SolarSchedule)
 from .utils import NEVER_CHECK_TIMEOUT
+
+if TYPE_CHECKING:
+    import kombu
 
 # This scheduler must wake up more frequently than the
 # regular of 5 minutes because it needs to take external
@@ -231,7 +235,7 @@ class DatabaseScheduler(Scheduler):
     Model = PeriodicTask
     Changes = PeriodicTasks
 
-    _schedule = None
+    _schedule: dict[str, ModelEntry] | None = None
     _last_timestamp = None
     _initial_read = True
     _heap_invalidated = False
@@ -291,14 +295,14 @@ class DatabaseScheduler(Scheduler):
             self._last_timestamp = ts
         return False
 
-    def reserve(self, entry):
+    def reserve(self, entry: ModelEntry) -> ModelEntry:
         new_entry = next(entry)
         # Need to store entry by name, because the entry may change
         # in the mean time.
         self._dirty.add(new_entry.name)
         return new_entry
 
-    def sync(self):
+    def sync(self) -> None:
         if logger.isEnabledFor(logging.DEBUG):
             debug('Writing entries...')
         _tried = set()
