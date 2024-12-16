@@ -4,11 +4,19 @@ from __future__ import annotations
 import datetime
 import logging
 import math
+import sys
 from multiprocessing.util import Finalize
 from typing import TYPE_CHECKING
 
-from celery import Celery, current_app, schedules
-from celery.beat import ScheduleEntry, Scheduler
+from celery import Celery, Task, current_app, schedules
+from celery.beat import (
+    ScheduleEntry,
+    Scheduler,
+    SchedulingError,
+    _evaluate_entry_args,
+    _evaluate_entry_kwargs,
+)
+from celery.exceptions import reraise
 from celery.utils.log import get_logger
 from celery.utils.time import maybe_make_aware
 from django.conf import settings
@@ -19,8 +27,15 @@ from kombu.utils.encoding import safe_repr, safe_str
 from kombu.utils.json import dumps, loads
 
 from .clockedschedule import clocked
-from .models import (ClockedSchedule, CrontabSchedule, IntervalSchedule,
-                     PeriodicTask, PeriodicTasks, SolarSchedule)
+from .models import (
+    ClockedSchedule,
+    CrontabSchedule,
+    IntervalSchedule,
+    PeriodicTask,
+    PeriodicTasks,
+    RunHistory,
+    SolarSchedule,
+)
 from .utils import NEVER_CHECK_TIMEOUT
 
 if TYPE_CHECKING:
@@ -296,6 +311,11 @@ class DatabaseScheduler(Scheduler):
         return False
 
     def reserve(self, entry: ModelEntry) -> ModelEntry:
+        """
+        Return a new instance of ModelEntry with:
+          - total_run_count incremented
+          - last_run_at reset to now()
+        """
         new_entry = next(entry)
         # Need to store entry by name, because the entry may change
         # in the mean time.
@@ -328,9 +348,9 @@ class DatabaseScheduler(Scheduler):
             # retry later, only for the failed ones
             self._dirty |= _failed
 
-    def update_from_dict(self, mapping):
+    def update_from_dict(self, dict_) -> None:
         s = {}
-        for name, entry_fields in mapping.items():
+        for name, entry_fields in dict_.items():
             try:
                 entry = self.Entry.from_entry(name,
                                               app=self.app,
@@ -361,7 +381,7 @@ class DatabaseScheduler(Scheduler):
         return super().schedules_equal(*args, **kwargs)
 
     @property
-    def schedule(self) -> dict[str, ModelEntry] | None:
+    def schedule(self) -> dict[str, ModelEntry]:
         initial = update = False
         if self._initial_read:
             debug('DatabaseScheduler: initial read')
@@ -383,3 +403,121 @@ class DatabaseScheduler(Scheduler):
                     repr(entry) for entry in self._schedule.values()),
                 )
         return self._schedule
+
+
+    def apply_entry(self, entry:ModelEntry, producer: kombu.Producer | None = None
+                    ) -> None:
+        # Called from Scheduler.tick()
+        # Overrides Scheduler.apply_entry()
+        try:
+            # advance=False because reserve(entry) has already been called by tick()
+            result = self.apply_async(entry, producer=producer, advance=False)
+        except Exception as exc:  # noqa: BLE001
+            reraise(SchedulingError, SchedulingError(
+                "Couldn't apply scheduled task {0.name}: {exc}".format(
+                    entry, exc=exc)), sys.exc_info()[2])
+        else:
+            if result and hasattr(result, 'id'):
+                debug('%s sent. id->%s', entry.task, result.id)
+            else:
+                debug('%s sent.', entry.task)
+        finally:
+            self._tasks_since_sync += 1
+
+            # Periodically sync Schedule with DB
+            if self.should_sync():
+                self._do_sync()
+
+    def apply_async(self, entry: ModelEntry, producer:kombu.Producer | None = None,
+                    advance=True, **kwargs):
+        # Update time-stamps and run counts before we actually execute,
+        # so we have that done if an exception is raised (doesn't schedule
+        # forever.)
+        entry = self.reserve(entry) if advance else entry
+        task: Task = self.app.tasks.get(entry.task)
+        task_result = None
+
+        entry_args = _evaluate_entry_args(entry.args)
+        entry_kwargs = _evaluate_entry_kwargs(entry.kwargs)
+
+        with transaction.atomic(durable=True):
+            # get_or_create() is atomic because a unique constraint is set on
+            # ["periodic_task", "run_count"] in the RunHistory model.
+            logger.debug(
+                    "Checking if run number #%s has already been triggered for %s",
+                    entry.total_run_count, entry
+                )
+            run_entry, created = RunHistory.objects.get_or_create(
+                periodic_task=entry.model,
+                run_number=entry.total_run_count,
+                defaults={"run_at": entry.default_now()}
+            )
+
+            if not created:
+                logger.debug("Run number #%s already triggered... nothing to do",
+                            entry.total_run_count)
+                return
+
+            try:  # DB entry is written... try to publish message to broker
+                if task:
+                    task_result = task.apply_async(entry_args, entry_kwargs,
+                                            producer=producer,
+                                            **entry.options)
+                else:
+                    task_result = self.send_task(entry.task, entry_args, entry_kwargs,
+                                        producer=producer,
+                                        **entry.options)
+            except Exception:  # noqa: BLE001
+                logger.debug("Failed to trigger task entry: %s", entry)
+                del_count, _ = run_entry.delete()
+                logger.debug("Cleanedup %s DB records", del_count)
+            else:
+                logger.info('Scheduler: Sending due task %s (%s)', entry.name,
+                            entry.task)
+                return task_result
+
+
+    def apply_async2(self, entry: ModelEntry, producer:kombu.Producer | None = None,
+                    advance=True, **kwargs):
+        """Send the task to the message broken producer"""
+
+        with transaction.atomic(durable=True):
+            # get_or_create() is atomic because a unique constraint is set on
+            # ["periodic_task", "run_count"] in the RunHistory model.
+            logger.debug(
+                    "Checking if run number #%s has already been triggered for %s",
+                    entry.total_run_count, entry
+                )
+            run_entry, created = RunHistory.objects.get_or_create(
+                periodic_task=entry.model,
+                run_number=entry.total_run_count,
+                defaults={"run_at": entry.default_now()}
+            )
+
+            if created:
+                # entry has been recorded in RunHistory, now publish the message
+                logger.debug("Triggering run number #%s", entry.total_run_count)
+                try:
+                    super().apply_async(entry, producer, advance, **kwargs)
+                # except Error:
+                #     raise
+                except Exception:  # noqa: BLE001
+                    logger.debug("Failed to trigger task entry: %s", entry)
+                    # reraise for django.db base Error() to trigger transaction rollback
+                    raise
+                    # del_count, _ = run_entry.delete()
+                    # logger.debug("Cleanedup %s DB records", del_count)
+            else:
+                logger.debug("Run number #%s already triggered... nothing to do",
+                            entry.total_run_count)
+
+
+##
+# 1. Scheduler.apply_sync()'s INFO log message is done too early, task might get rolled back.
+# 2. Total run count continues to increment even for failed tasks
+#     - decrement local total_run_count on failure
+# 3. Celery beat schedulers can run behind, creating a delay in the recovery of the schedule when the leader terminates
+#     - periodic sync needs to also have a catchup if DB is ahead of local total_run_count...
+#     - use select_for_update() to sync to DB to avoid race conditions
+#     - is DB -> local cache update reliable? How is this triggered? Signals don't seem to trigger the beat scheduler to update it's local cache
+# 4. Implementation approach? Subclass Scheduler and ScheduleEntry OR fork django-celery-beat?
